@@ -204,3 +204,89 @@ expand_test!(many_args, {
 
     assert!(server_data.0.load(Ordering::SeqCst));
 });
+
+// rs server wire trace of many_args, every arg type
+#[cfg(feature = "log")]
+#[test]
+fn many_args_wire_trace() {
+    use crate::debug::WIRE_CAPTURE;
+
+    let (tx, rx) = std::os::unix::net::UnixStream::pair().unwrap();
+    let server = server_rs::Backend::new().unwrap();
+    let _client_id = server.handle().insert_client(rx, Arc::new(())).unwrap();
+    let client = client_rs::Backend::connect(tx).unwrap();
+    let server_data = Arc::new(ServerData(AtomicBool::new(false)));
+    let client_data = Arc::new(ClientData(AtomicBool::new(false)));
+    server.handle().create_global(&interfaces::TEST_GLOBAL_INTERFACE, 1, server_data.clone());
+
+    WIRE_CAPTURE.with(|c| *c.borrow_mut() = Some(Vec::new()));
+    let client_display = client.display_id();
+    let registry_id = client
+        .send_request(
+            message!(&client_display, 1, [Argument::NewId(client_rs::ObjectId::null())],),
+            Some(Arc::new(DoNothingData)),
+            Some((&interfaces::WL_REGISTRY_INTERFACE, 1)),
+        )
+        .unwrap();
+    let test_global_id = client
+        .send_request(
+            message!(
+                &registry_id,
+                0,
+                [
+                    Argument::Uint(1),
+                    Argument::Str(Some(Box::new(interfaces::TEST_GLOBAL_INTERFACE.name))),
+                    Argument::Uint(1),
+                    Argument::NewId(client_rs::ObjectId::null()),
+                ],
+            ),
+            Some(client_data.clone()),
+            Some((&interfaces::TEST_GLOBAL_INTERFACE, 1)),
+        )
+        .unwrap();
+    client.flush().unwrap();
+    server.dispatch_all_clients(&mut ()).unwrap();
+    server.flush(None).unwrap();
+    client.prepare_read().unwrap().read().unwrap();
+    let stdin = io::stdin().lock();
+    client
+        .send_request(
+            message!(
+                &test_global_id,
+                0,
+                [
+                    Argument::Uint(42),
+                    Argument::Int(-13),
+                    Argument::Fixed(4589),
+                    Argument::Array(Box::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9])),
+                    Argument::Str(Some(Box::new("I like trains"))),
+                    Argument::Fd(stdin.as_fd()),
+                ],
+            ),
+            None,
+            None,
+        )
+        .unwrap();
+    client.flush().unwrap();
+    server.dispatch_all_clients(&mut ()).unwrap();
+    assert!(server_data.0.load(Ordering::SeqCst));
+
+    let lines = WIRE_CAPTURE.with(|c| c.borrow_mut().take()).unwrap();
+    let lines: Vec<&str> = lines.iter().map(|l| crate::debug::tests::untimed(l)).collect();
+    let conn = lines[0].split_once(' ').unwrap().0;
+    assert!(conn.starts_with('<') && conn.ends_with('>'), "{}", lines[0]);
+    let expected = [
+        "wl_display#1.get_registry(new id wl_registry#2)".to_string(),
+        " -> wl_registry#2.global(1, \"test_global\", 1)".to_string(),
+        "wl_registry#2.bind(1, \"test_global\", 1, new id [unknown]#3)".to_string(),
+        " -> test_global#3.many_args_evt(1337, -53, 38.37109375, array[9], \"I want cake\", fd "
+            .to_string(),
+        "test_global#3.many_args(42, -13, 17.92578125, array[9], \"I like trains\", fd "
+            .to_string(),
+    ];
+    assert_eq!(lines.len(), expected.len(), "{lines:#?}");
+    for (line, want) in lines.iter().zip(&expected) {
+        let rest = line.strip_prefix(conn).and_then(|l| l.strip_prefix(' ')).unwrap();
+        assert!(rest.starts_with(want.as_str()), "{rest:?} is not {want:?}");
+    }
+}

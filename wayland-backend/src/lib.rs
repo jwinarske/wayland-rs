@@ -31,6 +31,10 @@
 //! those messages are printed to stderr. If you activate the `log` cargo feature, they will instead be
 //! piped through the `log` crate.
 //!
+//! With the `log` feature, the rust server backend also logs each message at `trace` level on
+//! the `wayland_backend::wire` target, in libwayland's `WAYLAND_DEBUG` format with a ` <N>`
+//! connection tag. For use with [wayland-debug](https://github.com/wmww/wayland-debug).
+//!
 //! ## raw-window-handle integration
 //!
 //! The `rwh_06` feature activates the [`HasDisplayHandle`][rwh_06::HasDisplayHandle] implementation

@@ -22,9 +22,12 @@
 - client/sys: Make `ReadEventsGuard` impl `Send+Sync`, like `rs` backend
 - client/sys: Fix double mutex lock in `set_data`
 - client/rs: Don't return `WouldBlock` on `ReadEventsGuard::read`, like `sys`
+- rs: `WAYLAND_DEBUG` output no longer panics on a closed stderr
 
 #### Changes
 - rs: Log dates with format matching `libwayland` 1.26
+- server/rs: `log` feature logs a wire trace on target `wayland_backend::wire`,
+  libwayland format
 
 ## 0.3.15 -- 2026-03-30
 
