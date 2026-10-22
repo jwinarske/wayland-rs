@@ -158,6 +158,18 @@ impl<D> Client<D> {
                 false,
             );
         }
+        #[cfg(feature = "log")]
+        if debug::wire_enabled() {
+            let wire = args.iter().map(event_wire_arg).collect::<SmallVec<[_; INLINE_ARGS]>>();
+            debug::log_wire(&debug::WireLine {
+                conn: self.id.serial,
+                sent: true,
+                interface: object.interface.name,
+                id: object_id.id.id,
+                message: message_desc.name,
+                args: &wire,
+            });
+        }
 
         let mut msg_args = SmallVec::with_capacity(args.len());
         let mut arg_interfaces = message_desc.arg_interfaces.iter();
@@ -384,8 +396,50 @@ impl<D> Client<D> {
                     &msg.args,
                 );
             }
+            #[cfg(feature = "log")]
+            if debug::wire_enabled() {
+                let desc = obj.interface.requests.get(msg.opcode as usize).unwrap();
+                let wire = msg
+                    .args
+                    .iter()
+                    .map(|arg| self.request_wire_arg(arg, desc.child_interface))
+                    .collect::<SmallVec<[_; INLINE_ARGS]>>();
+                debug::log_wire(&debug::WireLine {
+                    conn: self.id.serial,
+                    sent: false,
+                    interface: obj.interface.name,
+                    id: msg.sender_id,
+                    message: desc.name,
+                    args: &wire,
+                });
+            }
 
             return Ok((msg, obj));
+        }
+    }
+
+    /// Request arg for the wire trace. Not validated yet; an unknown id
+    /// prints `[unknown]`.
+    #[cfg(feature = "log")]
+    fn request_wire_arg<'a>(
+        &self,
+        arg: &'a Argument<u32, OwnedFd>,
+        child_interface: Option<&'static Interface>,
+    ) -> debug::WireArg<'a> {
+        use std::os::fd::AsRawFd;
+        match arg {
+            Argument::Int(i) => debug::WireArg::Int(*i),
+            Argument::Uint(u) => debug::WireArg::Uint(*u),
+            Argument::Fixed(f) => debug::WireArg::Fixed(*f),
+            Argument::Str(s) => debug::WireArg::Str(s.as_deref().map(|s| s.as_c_str())),
+            Argument::Object(0) => debug::WireArg::Object(None),
+            Argument::Object(id) => debug::WireArg::Object(Some((
+                self.map.find(*id).map_or("[unknown]", |o| o.interface.name),
+                *id,
+            ))),
+            Argument::NewId(id) => debug::WireArg::NewId(child_interface.map(|i| i.name), *id),
+            Argument::Array(a) => debug::WireArg::Array(a.len()),
+            Argument::Fd(fd) => debug::WireArg::Fd(fd.as_raw_fd()),
         }
     }
 
@@ -775,5 +829,21 @@ impl<D> ClientStore<D> {
         self.clients.iter().flat_map(|opt| {
             opt.as_ref().filter(|c| !c.killed).map(|client| ClientId { id: client.id.clone() })
         })
+    }
+}
+
+/// Event arg for the wire trace
+#[cfg(feature = "log")]
+fn event_wire_arg(arg: &Argument<ObjectId, std::os::unix::io::RawFd>) -> debug::WireArg<'_> {
+    match arg {
+        Argument::Int(i) => debug::WireArg::Int(*i),
+        Argument::Uint(u) => debug::WireArg::Uint(*u),
+        Argument::Fixed(f) => debug::WireArg::Fixed(*f),
+        Argument::Str(s) => debug::WireArg::Str(s.as_deref().map(|s| s.as_c_str())),
+        Argument::Object(o) if o.id.id == 0 => debug::WireArg::Object(None),
+        Argument::Object(o) => debug::WireArg::Object(Some((o.id.interface.name, o.id.id))),
+        Argument::NewId(o) => debug::WireArg::NewId(Some(o.id.interface.name), o.id.id),
+        Argument::Array(a) => debug::WireArg::Array(a.len()),
+        Argument::Fd(fd) => debug::WireArg::Fd(*fd),
     }
 }

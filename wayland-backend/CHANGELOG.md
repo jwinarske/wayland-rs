@@ -1,5 +1,16 @@
 # CHANGELOG: wayland-backend
 
+## Unreleased
+
+Backport from `master`.
+
+#### Bugfixes
+- rs: `WAYLAND_DEBUG` output no longer panics on a closed stderr
+
+#### Changes
+- server/rs: `log` feature logs a wire trace on target `wayland_backend::wire`,
+  libwayland format
+
 ## 0.3.17 -- 2026-08-14
 
 Backport from `master`.
